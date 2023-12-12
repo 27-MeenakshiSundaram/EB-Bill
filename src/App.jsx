@@ -1,12 +1,19 @@
-import React,{ useEffect, useState } from 'react'
-import Box from '@mui/material/Box';
+import React,{ useEffect, useState,useRef } from 'react'
+
 import Tab from '@mui/material/Tab';
 import TabContext from '@mui/lab/TabContext';
 import TabList from '@mui/lab/TabList';
 import TabPanel from '@mui/lab/TabPanel';
 import { useFormik} from 'formik';
 import * as Yup from 'yup';
-import { Icon } from '@mui/material';
+import EditIcon from '@mui/icons-material/Edit';
+import DeleteIcon from '@mui/icons-material/Delete';
+import IconButton from '@mui/material/IconButton';
+import generatePDF from 'react-to-pdf';
+import { useReactToPrint } from 'react-to-print';
+import { Button } from '@mui/material';
+import FileDownloadIcon from '@mui/icons-material/FileDownload';
+import PrintIcon from '@mui/icons-material/Print';
 
 function Eb(){
   const [value, setValue] =useState('1');
@@ -17,8 +24,15 @@ function Eb(){
   const [showTable, setShowTable] = useState(false);
   const [paydata,setpaydata]=useState([])
 
+  const currentDate = new Date().toISOString().split('T')[0];
   const uniqueEbNos = [...new Set(billdata.map((item) => item.ebNo))];
   const data =JSON.parse(localStorage.getItem('billlist')) 
+
+  const targetRef =useRef();
+    const handlePrint =useReactToPrint({
+      content:()=>targetRef.current,
+      fileName:'your-desired-filename.pdf'
+    });
 
   const handleEbNoChange = (event) => {
     const selectedEbNo = event.target.value;
@@ -31,12 +45,12 @@ function Eb(){
     const uniqueMonths = [...new Set(billdata.filter((item) => item.ebNo === selectedEbNo).map((item) => item.date))];
     const dateDropdown = document.getElementById('date1');
 
-    // Clear existing options
+    
     while (dateDropdown.firstChild) {
       dateDropdown.removeChild(dateDropdown.firstChild);
     }
 
-    // Populate the Month dropdown
+   
     uniqueMonths.forEach((month, index) => {
       const option = document.createElement('option');
       option.value = month;
@@ -57,6 +71,8 @@ function Eb(){
   };
   const handleReset = () => {
     formik.handleReset();
+    document.getElementById('ebno1').value = '';
+    document.getElementById('date1').innerHTML = '<option value="">-SELECT-</option>'; 
   };
 
   const handleChange = (event, newValue) => {
@@ -79,10 +95,11 @@ function Eb(){
     fetchAndShowTableData()
     fetchPaymentDataAndShowTable();
   },[])
+  const ebNoRegex = /^[a-zA-Z0-9]+$/;
 
   const validationSchema = Yup.object().shape({
     date: Yup.date().required('Date is required'),
-    ebno: Yup.string().required('EB Number is required'),
+    ebno: Yup.string().matches(ebNoRegex, 'EB Number should contain only letters and numbers').required('EB Number is required'),
     unit: Yup.number().required('Unit is required').min(0, 'Unit must be greater than or equal to 0'),
     price: Yup.number().required('Price is required').min(0, 'Price must be greater than or equal to 0'),
   });
@@ -104,6 +121,7 @@ function Eb(){
       ebNo: values.ebno,
       unit: values.unit,
       price: values.price,
+      status:false
     };
     const existingEntry = billdata.find(
       (item) =>
@@ -114,7 +132,7 @@ function Eb(){
   
     if (existingEntry) {
       alert('An entry with the same EB Number and month or date already exists!');
-      return; // Do not proceed further if there's a matching entry
+      return;
     }
   setunit('')
   setprice('')
@@ -143,7 +161,7 @@ function clearformm(){
 const saveBillListToLocalStorage = (data) => {
   localStorage.setItem('billlist', JSON.stringify(data));
 };
-// Function to get bill list data from localStorage
+
 const getBillListFromLocalStorage = () => {
   const data = localStorage.getItem('billlist');
   return data ? JSON.parse(data) : [];
@@ -192,12 +210,12 @@ const handlepayment = () => {
   if(page2check(ebNo,selectedDate,month,price)){
     return ;
   }
-  const isDuplicateEntry = paydata.some(
+  const isDuplicateEntry =paydata.length>0 && paydata.some(
     (item) => item.ebNo === ebNo && item.month === month
   );
 
   if (isDuplicateEntry) {
-    alert('Payment entry for the same EB No and month already exists!');
+    alert('Payment entry for the same EB No and month already Payed!!');
     return;
   }
   const paymentData = {
@@ -206,7 +224,7 @@ const handlepayment = () => {
     price: price,
     status: 'PAID',
   };
-
+  
  
   let paymentList = getPaymentFromLocalStorage();
   if (!Array.isArray(paymentList)) {
@@ -215,16 +233,21 @@ const handlepayment = () => {
   paymentList.push(paymentData); 
   savePaymentToLocalStorage(paymentList);
   setpaydata(paymentList);
- 
-  // const tableBody = document.getElementById('testbody1');
-  // const newRow = document.createElement('tr');
-  // newRow.innerHTML = `
-  //   <td>${paymentData.ebNo}</td>
-  //   <td>${paymentData.month}</td>
-  //   <td>${paymentData.price}</td>
-  //   <td><button class="btn btn-outline-success">Paid</button></td>
-  // `;
-  // tableBody.appendChild(newRow);
+  const updatedBillData = billdata.map((item) => {
+    const itemMonth = itemDate.toLocaleString('default', { month: 'long' });
+
+    if (item.ebNo === ebNo && itemMonth.includes(month)) {
+      return { ...item, status: 'PAID' };
+    }
+    return item;
+  });
+
+  setbilldata(updatedBillData);
+  saveBillListToLocalStorage(updatedBillData);
+
+  document.getElementById('ebno1').value = '';
+  document.getElementById('date1').innerHTML = '<option value="">-SELECT-</option>'; 
+  document.getElementById('price').value = '';
 };
 const savePaymentToLocalStorage = (data) => {
   localStorage.setItem('payment', JSON.stringify(data));
@@ -245,35 +268,28 @@ function updatefunction() {
   setbilldata([...data]);
   console.log(data);
   localStorage.setItem('billlist', JSON.stringify(data));
+  document.getElementById('btn1').style.display = 'inline-block'; // Show the Save button
+  formik.resetForm(); 
+  setprice('');
 }
 const fetchPaymentDataAndShowTable = () => {
   const paymentList = getPaymentFromLocalStorage();
-  // const tableBody = document.getElementById('testbody1');
-  // tableBody.innerHTML = ''; 
-  
-  // paymentList.forEach((payment) => {
-  //   const newRow = document.createElement('tr');
-  //   newRow.innerHTML = `
-  //     <td>${payment.ebNo}</td>
-  //     <td>${payment.month}</td>
-  //     <td>${payment.price}</td>
-  //     <td>${payment.status}</td>
-  //   `;
-  //   tableBody.appendChild(newRow);
-  // });
    setpaydata(paymentList);
 };
-
+const isPaymentDone = (ebNo, month) => {
+  let m=new Date(month).toLocaleString('default', { month: 'long' })
+  return paydata.length>0 && paydata.some(payment => payment.ebNo == ebNo && payment.month == m);
+};
 return(<>
-<Box sx={{ width: '100%', typography: 'body1' }}>
+<div sx={{ width: '100%' }}>
       <TabContext value={value}>
-        <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-          <TabList onChange={handleChange} aria-label="lab API tabs example">
-            <Tab label="Home" value="1" />
-            <Tab label="Bill List" value="2" />
-            <Tab label="Payment" value="3" />
+        <div sx={{ backgroundColor: '#f0f0f9' }}>
+          <TabList onChange={handleChange} aria-label="lab API tabs example" sx={{backgroundColor:"#bfc6da"}}>
+            <Tab label="Home" value="1" style={{ color: 'black' }}/>
+            <Tab label="Bill List" value="2" style={{ color: 'black' }}/>
+            <Tab label="Payment" value="3" style={{ color: 'black' }} />
           </TabList>
-        </Box>
+        </div>
         <TabPanel value="1"><div
   className="tab-pane fade show active"
   id="home-tab-pane"
@@ -301,6 +317,7 @@ return(<>
             name="date"
             onChange={formik.handleChange}
             value={formik.values.date}
+            max={currentDate} 
           />
           {formik.touched.date && formik.errors.date ? (
                     <div className="text-danger">{formik.errors.date}</div>
@@ -358,26 +375,27 @@ return(<>
                 showtable
               </button>
               )}
-              <button className="btn btn-primary me-md-2 " id="btn1" type="submit">
+              <button className="btn btn-success me-md-2 btn-sm " id="btn1" type="submit">
                 Save
               </button>
-              <button type="reset" className="btn btn-danger">
-                Clear
-              </button>
-                <button
-                  className="btn btn-primary mx-1" type='button'
+              <button
+                  className="btn btn-primary mx-1 btn-sm" type='button'
                   onClick={updatefunction}
                   style={{display:srow ? 'inline-block':'none'}}
                 >
                   Update
                 </button>
+              <button type="reset" className="btn btn-danger btn-sm"  style={{ display: srow ? 'none' : 'inline-block' }}>
+                Clear All
+              </button>
+                
               
             </div>
     </form>
     
     <br />
     <div className="container">
-      <div className="table-responsive">
+      <div className="table-responsive table-striped">
       {showTable && billdata.length>0 && (
         <table className="table" id="show">
         <thead>
@@ -391,30 +409,37 @@ return(<>
           </tr>
         </thead>
         <tbody id="testbody">{/* Data will be inserted here */}
-        {billdata.map((item,index)=>(
-          <tr key={index}>
-            <td>{item.date}</td>
-            <td>{item.ebNo}</td>
-            <td>{item.unit}</td>
-            <td>{item.price}</td>
-            <td>{"NULL"}</td>
-           <td>
-        <button
-          className="btn btn-primary mx-1"
-          onClick={() => handleedit(item)}
-        >
-          Edit
-        </button>
-    
-      <button
-        className="btn btn-danger mx-1"
-        onClick={() => handleDelete(index)}
-      >
-        Delete
-      </button>
+        {billdata
+          .sort((a, b) => new Date(a.date) - new Date(b.date))
+          .map((item, index) => (
+  <tr key={index}>
+    <td>{item.date}</td>
+    <td>{item.ebNo}</td>
+    <td>{item.unit}</td>
+    <td>{item.price}</td>
+    <td>
+      {paydata.length>0 && isPaymentDone(item.ebNo, item.date) ? (
+        <button className="btn btn-success btn-sm">PAID</button>
+      ) : (
+        <button className="btn btn-danger btn-sm">NOT PAID</button>
+      )}
+    </td>
+    <td>
+      {!isPaymentDone(item.ebNo, item.date) && ( // Render buttons only if NOT PAID
+        <>
+          <IconButton onClick={() => handleedit(item)}>
+            <EditIcon color='primary'/>
+          </IconButton>
+          <IconButton onClick={() => handleDelete(index)}>
+            <DeleteIcon sx={{color:"Red"}}/>
+          </IconButton>
+        </>
+      )}
     </td>
   </tr>
 ))}
+
+        
         </tbody>
       </table>
       )}
@@ -456,7 +481,7 @@ return(<>
       <div className="col-sm-4 my-2">
         <b>Price:</b>
         <input
-          type="text"
+          type="text" readOnly
           className="form-control"
           id="price"
           placeholder="Enter Price"
@@ -466,15 +491,16 @@ return(<>
       </div>
     </div>
     <div className="col-sm-12 text-end">
-      <button type="button" className="btn btn-success" id="btn3" onClick={handlepayment}>
+      <button type="button" className="btn btn-success btn-sm" id="btn3" onClick={handlepayment}>
         <i className="fa-solid fa-floppy-disk" style={{ color: "#6691db" }} />
         Pay
       </button>&nbsp;&nbsp;&nbsp;
-      <button type="reset" className="btn btn-danger" onClick={handleReset}>
+      <button type="reset" className="btn btn-danger btn-sm" onClick={handleReset}>
         Cancel
       </button>
     </div>
   </form>
+  <div ref={targetRef} >
   <div className="container">
     <div className="table-responsive">
       <table className="table" id="show1">
@@ -492,7 +518,7 @@ return(<>
             <td>{item.ebNo}</td>
             <td>{item.month}</td>
             <td>{item.price}</td>
-            <td>{item.status}</td>
+            <td><button className="btn btn-success btn-sm">{item.status}</button></td>
   </tr>
 ))}
         </tbody>
@@ -500,9 +526,15 @@ return(<>
     </div>
   </div>
 </div>
+</div>
+<div className='text-end my-5'>
+<Button variant="outlined" className="mx-2" color="success" startIcon={<FileDownloadIcon/>} onClick={() => generatePDF(targetRef, {filename: `paidlist.pdf`})}>Download PDF</Button>
+<Button variant="outlined" className="mx-2" color="secondary" startIcon={<PrintIcon/>} onClick={handlePrint}>Print</Button>
+</div>
+
 </TabPanel>
       </TabContext>
-    </Box>
+    </div>
 
 
 </>)};
